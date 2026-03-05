@@ -6,6 +6,7 @@ import uuid
 import streamlit as st
 from dotenv import load_dotenv
 from openai import OpenAI
+from pypdf import PdfReader
 import tiktoken
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,7 +37,7 @@ st.markdown(
 
 # --- Fixed rules ---
 CHUNK_SIZE_TOKENS = 8192
-OVERLAP_TOKENS = 200
+OVERLAP_TOKENS = 100
 TIKTOKEN_ENCODING = "cl100k_base"
 
 DB_PATH = "chat_history.db"
@@ -89,7 +90,7 @@ def count_tokens(text: str) -> int:
     return len(enc.encode(text))
 
 
-def split_with_overlap_8192_200(text: str) -> list[str]:
+def split_with_overlap_8192_100(text: str) -> list[str]:
     enc = get_encoder()
     toks = enc.encode(text)
     if not toks:
@@ -252,11 +253,18 @@ def generate_title_from_first_ai_response(
 
 def parse_data_file(file_path: Path) -> dict:
     suffix = file_path.suffix.lower()
-    content = file_path.read_text(encoding="utf-8")
+    if suffix == ".pdf":
+        pdf = PdfReader(str(file_path))
+        content = "\n".join(page.extract_text() or "" for page in pdf.pages)
+        parsed = content
+    else:
+        content = file_path.read_text(encoding="utf-8")
 
     if suffix == ".json":
         parsed = json.loads(content)
     elif suffix in {".txt", ".csv"}:
+        parsed = content
+    elif suffix == ".pdf":
         parsed = content
     else:
         parsed = content
@@ -274,12 +282,24 @@ def append_data_to_chat(chat: dict, data_items: list[dict]) -> None:
         return
 
     for item in data_items:
-        chat["messages"].append(
-            {
-                "role": "user",
-                "content": f"Data dari file {item['name']}:\n{item['raw']}",
-            }
-        )
+        chunks = split_with_overlap_8192_100(item["raw"])
+        if len(chunks) == 1:
+            chat["messages"].append(
+                {
+                    "role": "user",
+                    "content": f"Data dari file {item['name']}:\n{chunks[0]}",
+                }
+            )
+        else:
+            for index, chunk in enumerate(chunks, start=1):
+                chat["messages"].append(
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Data dari file {item['name']} (chunk {index}/{len(chunks)}):\n{chunk}"
+                        ),
+                    }
+                )
 
 
 # --- Init DB ---
@@ -350,7 +370,7 @@ with st.sidebar:
     if st.button(
         "📥 Ambil data",
         use_container_width=True,
-        help="Muat file .json/.csv/.txt dari folder ./data",
+        help="Muat file .json/.csv/.txt/.pdf dari folder ./data",
     ):
         if not DATA_DIR.exists() or not DATA_DIR.is_dir():
             st.warning("Folder ./data tidak ditemukan.")
@@ -358,7 +378,7 @@ with st.sidebar:
             data_files = [
                 p
                 for p in sorted(DATA_DIR.iterdir())
-                if p.suffix.lower() in {".json", ".csv", ".txt"}
+                if p.suffix.lower() in {".json", ".csv", ".txt", ".pdf"}
             ]
             processed_items = [parse_data_file(file_path) for file_path in data_files]
             st.session_state.loaded_data = processed_items
@@ -416,7 +436,7 @@ if user_text:
 
     # Only split if user_text > 8192 tokens; otherwise keep as one message.
     if count_tokens(user_text) > CHUNK_SIZE_TOKENS:
-        chunks = split_with_overlap_8192_200(user_text)
+        chunks = split_with_overlap_8192_100(user_text)
         for chunk in chunks:
             current_chat["messages"].append({"role": "user", "content": chunk})
             with st.chat_message("user"):
