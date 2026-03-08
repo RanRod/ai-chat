@@ -90,6 +90,23 @@ def count_tokens(text: str) -> int:
     return len(enc.encode(text))
 
 
+def count_total_session_chunks(messages: list[dict]) -> int:
+    """
+    Hitung total chunk token berdasarkan seluruh isi session messages.
+    1 pesan = ceil(total_token_pesan / CHUNK_SIZE_TOKENS), minimal 1 chunk bila ada isi.
+    """
+    total_chunks = 0
+    for message in messages:
+        content = (message.get("content") or "").strip()
+        if not content:
+            continue
+
+        token_count = count_tokens(content)
+        total_chunks += max(1, (token_count + CHUNK_SIZE_TOKENS - 1) // CHUNK_SIZE_TOKENS)
+
+    return total_chunks
+
+
 def split_with_overlap_8192_100(text: str) -> list[str]:
     enc = get_encoder()
     toks = enc.encode(text)
@@ -391,6 +408,7 @@ with st.sidebar:
 
     st.caption(f"Provider: `{provider_name}`")
     st.caption(f"Model aktif: `{model_name}`")
+    st.caption(f"Total chunk session: `{count_total_session_chunks(current_chat['messages'])}`")
 
     st.divider()
     st.subheader("🗂️ List session chat")
@@ -434,17 +452,10 @@ if user_text:
         st.error(f"Chat tidak dapat diproses karena API key `{needed_key}` belum tersedia.")
         st.stop()
 
-    # Only split if user_text > 8192 tokens; otherwise keep as one message.
-    if count_tokens(user_text) > CHUNK_SIZE_TOKENS:
-        chunks = split_with_overlap_8192_100(user_text)
-        for chunk in chunks:
-            current_chat["messages"].append({"role": "user", "content": chunk})
-            with st.chat_message("user"):
-                st.markdown(chunk)
-    else:
-        current_chat["messages"].append({"role": "user", "content": user_text})
-        with st.chat_message("user"):
-            st.markdown(user_text)
+    # Tidak ada limit token per user input: simpan apa adanya sebagai satu pesan user.
+    current_chat["messages"].append({"role": "user", "content": user_text})
+    with st.chat_message("user"):
+        st.markdown(user_text)
 
     save_chat_to_db(st.session_state.active_chat_id, current_chat)
 
