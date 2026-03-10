@@ -90,21 +90,17 @@ def count_tokens(text: str) -> int:
     return len(enc.encode(text))
 
 
-def count_total_session_chunks(messages: list[dict]) -> int:
-    """
-    Hitung total chunk token berdasarkan seluruh isi session messages.
-    1 pesan = ceil(total_token_pesan / CHUNK_SIZE_TOKENS), minimal 1 chunk bila ada isi.
-    """
-    total_chunks = 0
+def count_total_context_window_tokens(messages: list[dict]) -> int:
+    """Hitung total token dari seluruh isi session messages (context window keseluruhan)."""
+    total_tokens = 0
     for message in messages:
         content = (message.get("content") or "").strip()
         if not content:
             continue
 
-        token_count = count_tokens(content)
-        total_chunks += max(1, (token_count + CHUNK_SIZE_TOKENS - 1) // CHUNK_SIZE_TOKENS)
+        total_tokens += count_tokens(content)
 
-    return total_chunks
+    return total_tokens
 
 
 def split_with_overlap_8192_100(text: str) -> list[str]:
@@ -408,7 +404,10 @@ with st.sidebar:
 
     st.caption(f"Provider: `{provider_name}`")
     st.caption(f"Model aktif: `{model_name}`")
-    st.caption(f"Total chunk session: `{count_total_session_chunks(current_chat['messages'])}`")
+    st.caption(
+        "Total context window session (token): "
+        f"`{count_total_context_window_tokens(current_chat['messages']):,}`"
+    )
 
     st.divider()
     st.subheader("🗂️ List session chat")
