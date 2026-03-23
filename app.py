@@ -208,18 +208,28 @@ def stream_openrouter(api_key: str, messages: list, model_name: str, reasoning_b
         raw_content = ""
         
         for chunk in stream:
+            # 1. Menangani object usage yang dikirim pada chunk terakhir
             if getattr(chunk, 'usage', None) is not None:
-                st.session_state.total_tokens = chunk.usage.total_tokens
+                if isinstance(chunk.usage, dict):
+                    st.session_state.total_tokens = chunk.usage.get("total_tokens", 0)
+                else:
+                    st.session_state.total_tokens = getattr(chunk.usage, "total_tokens", 0)
+                
                 token_placeholder.metric("Total Tokens (Context)", f"{st.session_state.total_tokens:,}")
 
-            if not getattr(chunk, 'choices', None) or len(chunk.choices) == 0: continue
+            # 2. Skip jika choices kosong untuk menghindari IndexError pada chunk terakhir
+            if not getattr(chunk, 'choices', None) or len(chunk.choices) == 0: 
+                continue
+                
             delta = chunk.choices[0].delta
             
+            # 3. Tangkap Reasoning
             reasoning = getattr(delta, 'reasoning', None)
             if reasoning and enable_reasoning:
                 thinking_text += reasoning
                 reasoning_box.info(f"**💭 Thinking Process (OpenRouter):**\n\n{thinking_text}")
             
+            # 4. Tangkap Content
             content = getattr(delta, 'content', None)
             if content:
                 raw_content += content
